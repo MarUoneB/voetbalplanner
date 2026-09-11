@@ -447,6 +447,21 @@
     background:var(--chalk-panel);color:var(--ink);
   }
   .beg-input:focus{outline:none;border-color:var(--amber);}
+  .opslag-status{
+    font-size:13.5px;line-height:1.55;color:var(--ink);margin:0 0 12px;
+    display:flex;align-items:flex-start;gap:8px;
+  }
+  .opslag-dot{
+    width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:5px;
+  }
+  .opslag-dot.groen{background:#2C7A4B;}
+  .opslag-dot.grijs{background:var(--bench);}
+  .opslag-dot.rood{background:var(--rust);}
+  .autoback{
+    display:flex;gap:9px;align-items:flex-start;margin:12px 0 4px;
+    font-size:13.5px;line-height:1.5;color:var(--ink);cursor:pointer;
+  }
+  .autoback input{margin-top:2px;width:18px;height:18px;flex-shrink:0;accent-color:var(--amber);}
   .beg-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
   .beg-row select{flex:1 1 180px;min-width:0;}
   .extra-box{
@@ -526,7 +541,8 @@
   html[data-theme="dark"] .clash-warn{background:var(--chalk-panel);}
   html[data-theme="dark"] .quarter-body{background:var(--chalk-panel);}
   html[data-theme="dark"] .tabbar{background:var(--chalk-panel);}
-  html[data-theme="dark"] .star{color:#3E3C32;}
+  html[data-theme="dark"] .star:not(.filled){color:#3E3C32;}
+  html[data-theme="dark"] .star.filled{color:var(--amber);}
   html[data-theme="dark"] .bar-wrap{background:#2A2922;}
   html[data-theme="dark"] table.stats th{color:var(--ink-soft);}
   html[data-theme="dark"] .setup-card{background:var(--chalk-panel);}
@@ -674,6 +690,22 @@
   <!-- DATA VIEW -->
   <section id="view-data" class="view">
     <div class="panel">
+      <h2>Databestand</h2>
+      <p class="opslag-status" id="opslagStatus"></p>
+      <div class="row" id="opslagKnoppen">
+        <button class="btn btn-primary" id="koppelBestandBtn">Nieuw databestand</button>
+        <button class="btn btn-ghost" id="openBestandBtn">Bestaand bestand openen</button>
+        <button class="btn btn-ghost" id="herverbindBtn">Opnieuw verbinden</button>
+        <button class="btn btn-rust" id="ontkoppelBtn">Loskoppelen</button>
+      </div>
+      <label class="autoback">
+        <input type="checkbox" id="autoBackupChk">
+        <span>Bewaar automatisch een back-upbestand na elke opgeslagen wedstrijd</span>
+      </label>
+      <p class="info">Koppel eenmalig een bestand, bijvoorbeeld in je iCloud- of Drive-map. Daarna schrijft de app elke wijziging er automatisch naartoe en kun je het altijd zelf openen of meenemen. Werkt in Chrome en Edge op een laptop.</p>
+    </div>
+
+    <div class="panel">
       <h2>Opgeslagen weken</h2>
       <div id="weekListWrap"></div>
     </div>
@@ -800,6 +832,7 @@
 
   var saveWarningShown = false;
   function saveState(){
+    if (typeof planSchrijf === "function") planSchrijf();
     try{
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     }catch(e){
@@ -1917,6 +1950,8 @@
     saveState();
     renderBegeleiding();
 
+    autoBackupNaWeek();
+
     alert("Week van "+formatDateNL(weekData.date)+" is opgeslagen.");
     renderQuarters();
   });
@@ -2747,6 +2782,42 @@
 
   var importFile = document.getElementById("importFile");
   document.getElementById("importBtn").addEventListener("click", function(){ importFile.click(); });
+  // Neemt een ingelezen back-up over als huidige toestand en tekent alles opnieuw.
+  function neemStateOver(imported){
+        state = imported;
+    if (!state.config) state.config = { keeperBlok: 1 };
+    if (typeof state.config.keeperBlok !== "number") state.config.keeperBlok = 1;
+    state.players.forEach(function(p){
+      if (typeof p.position !== "string") p.position = "";
+      if (typeof p.keeperPref !== "string") p.keeperPref = "";
+      if (typeof p.begeleider !== "string") p.begeleider = "";
+      if (typeof p.begeleiderMee !== "boolean") p.begeleiderMee = true;
+    });
+    if (!state.editor) state.editor = { date: todayISO(), opponent: "", homeAway: "thuis", scoreFor: "", scoreAgainst: "", scorers: {}, limits: {}, extraSpeler: false, begeleiderId: null, presentIds: state.players.map(function(p){return p.id;}), quarters:null, editingWeekId:null };
+    if (typeof state.editor.opponent !== "string") state.editor.opponent = "";
+    if (state.editor.homeAway !== "thuis" && state.editor.homeAway !== "uit") state.editor.homeAway = "thuis";
+    if (typeof state.editor.scoreFor === "undefined" || state.editor.scoreFor===null) state.editor.scoreFor = "";
+    if (typeof state.editor.scoreAgainst === "undefined" || state.editor.scoreAgainst===null) state.editor.scoreAgainst = "";
+    if (!state.editor.scorers || typeof state.editor.scorers !== "object") state.editor.scorers = {};
+    if (!state.editor.limits || typeof state.editor.limits !== "object") state.editor.limits = {};
+    if (typeof state.editor.extraSpeler !== "boolean") state.editor.extraSpeler = false;
+    if (typeof state.editor.begeleiderId === "undefined") state.editor.begeleiderId = null;
+    (state.weeks||[]).forEach(function(w){ if (!w.limits || typeof w.limits !== "object") w.limits = {}; });
+    (state.weeks||[]).forEach(function(w){ if (!w.scorers || typeof w.scorers !== "object") w.scorers = {}; });
+    saveState();
+    weekDateInput.value = state.editor.date;
+    opponentInput.value = state.editor.opponent;
+    renderHomeAwaySwitch();
+    scoreForInput.value = state.editor.scoreFor;
+    scoreAgainstInput.value = state.editor.scoreAgainst;
+    updateScoreOpponentLabel();
+    renderPresenceRow();
+    renderQuarters();
+    renderPlayerList();
+    renderWeekList();
+    renderStats();
+  }
+
   importFile.addEventListener("change", function(){
     var file = importFile.files[0];
     if (!file) return;
@@ -2756,38 +2827,7 @@
         var imported = JSON.parse(reader.result);
         if (!imported.players || !imported.weeks) throw new Error("Onherkenbaar bestand");
         if (!confirm("Dit vervangt alle huidige gegevens in de app door de back-up uit dit bestand. Doorgaan?")) return;
-        state = imported;
-        if (!state.config) state.config = { keeperBlok: 1 };
-        if (typeof state.config.keeperBlok !== "number") state.config.keeperBlok = 1;
-        state.players.forEach(function(p){
-          if (typeof p.position !== "string") p.position = "";
-          if (typeof p.keeperPref !== "string") p.keeperPref = "";
-          if (typeof p.begeleider !== "string") p.begeleider = "";
-          if (typeof p.begeleiderMee !== "boolean") p.begeleiderMee = true;
-        });
-        if (!state.editor) state.editor = { date: todayISO(), opponent: "", homeAway: "thuis", scoreFor: "", scoreAgainst: "", scorers: {}, limits: {}, extraSpeler: false, begeleiderId: null, presentIds: state.players.map(function(p){return p.id;}), quarters:null, editingWeekId:null };
-        if (typeof state.editor.opponent !== "string") state.editor.opponent = "";
-        if (state.editor.homeAway !== "thuis" && state.editor.homeAway !== "uit") state.editor.homeAway = "thuis";
-        if (typeof state.editor.scoreFor === "undefined" || state.editor.scoreFor===null) state.editor.scoreFor = "";
-        if (typeof state.editor.scoreAgainst === "undefined" || state.editor.scoreAgainst===null) state.editor.scoreAgainst = "";
-        if (!state.editor.scorers || typeof state.editor.scorers !== "object") state.editor.scorers = {};
-        if (!state.editor.limits || typeof state.editor.limits !== "object") state.editor.limits = {};
-        if (typeof state.editor.extraSpeler !== "boolean") state.editor.extraSpeler = false;
-        if (typeof state.editor.begeleiderId === "undefined") state.editor.begeleiderId = null;
-        (state.weeks||[]).forEach(function(w){ if (!w.limits || typeof w.limits !== "object") w.limits = {}; });
-        (state.weeks||[]).forEach(function(w){ if (!w.scorers || typeof w.scorers !== "object") w.scorers = {}; });
-        saveState();
-        weekDateInput.value = state.editor.date;
-        opponentInput.value = state.editor.opponent;
-        renderHomeAwaySwitch();
-        scoreForInput.value = state.editor.scoreFor;
-        scoreAgainstInput.value = state.editor.scoreAgainst;
-        updateScoreOpponentLabel();
-        renderPresenceRow();
-        renderQuarters();
-        renderPlayerList();
-        renderWeekList();
-        renderStats();
+        neemStateOver(imported);
         alert("Back-up geladen.");
       }catch(e){
         alert("Kon dit bestand niet lezen als back-up.");
@@ -2839,7 +2879,217 @@
     renderQuarters();
   });
 
+  // ---------- databestand: alles in een los JSON-bestand bewaren ----------
+  // Op desktop-Chrome/Edge koppel je eenmalig een bestand; daarna schrijft de
+  // app er bij elke wijziging automatisch naartoe. Op Android bestaat die
+  // mogelijkheid niet, daar valt de app terug op een automatische back-up.
+  var FS_BESCHIKBAAR = (typeof window.showSaveFilePicker === "function" &&
+                        typeof window.showOpenFilePicker === "function");
+  var bestandHandle = null;
+  var schrijfTimer = null;
+  var laatstOpgeslagen = null;
+
+  // handle bewaren in IndexedDB (localStorage kan dat niet)
+  function idb(){
+    return new Promise(function(res, rej){
+      var req = indexedDB.open("jo92_planner_fs", 1);
+      req.onupgradeneeded = function(){ req.result.createObjectStore("kv"); };
+      req.onsuccess = function(){ res(req.result); };
+      req.onerror = function(){ rej(req.error); };
+    });
+  }
+  function idbZet(k, v){
+    return idb().then(function(db){
+      return new Promise(function(res, rej){
+        var tx = db.transaction("kv", "readwrite");
+        tx.objectStore("kv").put(v, k);
+        tx.oncomplete = res; tx.onerror = function(){ rej(tx.error); };
+      });
+    });
+  }
+  function idbHaal(k){
+    return idb().then(function(db){
+      return new Promise(function(res, rej){
+        var tx = db.transaction("kv", "readonly");
+        var r = tx.objectStore("kv").get(k);
+        r.onsuccess = function(){ res(r.result || null); };
+        r.onerror = function(){ rej(r.error); };
+      });
+    });
+  }
+
+  function toestemming(handle, vragen){
+    var opties = { mode: "readwrite" };
+    return handle.queryPermission(opties).then(function(st){
+      if (st === "granted") return true;
+      if (!vragen) return false;
+      return handle.requestPermission(opties).then(function(s2){ return s2 === "granted"; });
+    });
+  }
+
+  function schrijfNaarBestand(){
+    if (!bestandHandle) return Promise.resolve(false);
+    return toestemming(bestandHandle, false).then(function(ok){
+      if (!ok) { renderOpslagStatus("verbinding verbroken"); return false; }
+      return bestandHandle.createWritable().then(function(wr){
+        return wr.write(JSON.stringify(state, null, 2)).then(function(){
+          return wr.close();
+        });
+      }).then(function(){
+        laatstOpgeslagen = new Date();
+        renderOpslagStatus();
+        return true;
+      });
+    }).catch(function(e){
+      console.error("schrijven mislukt", e);
+      renderOpslagStatus("schrijven mislukt");
+      return false;
+    });
+  }
+
+  // Wordt na elke wijziging aangeroepen; even wachten zodat snel klikken
+  // niet tot tientallen schrijfacties leidt.
+  function planSchrijf(){
+    if (!bestandHandle) return;
+    if (schrijfTimer) clearTimeout(schrijfTimer);
+    schrijfTimer = setTimeout(function(){ schrijfTimer = null; schrijfNaarBestand(); }, 700);
+  }
+
+  function tijdKort(d){
+    if (!d) return "";
+    return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+  }
+
+  function renderOpslagStatus(fout){
+    var el = document.getElementById("opslagStatus");
+    var knoppen = document.getElementById("opslagKnoppen");
+    if (!el) return;
+
+    if (!FS_BESCHIKBAAR){
+      el.innerHTML = '<span class="opslag-dot grijs"></span>Deze browser kan niet rechtstreeks naar een bestand schrijven. ' +
+        'Gebruik hieronder de back-upknoppen, of open de app op een laptop met Chrome of Edge om een databestand te koppelen.';
+      if (knoppen) knoppen.style.display = "none";
+      return;
+    }
+    if (!bestandHandle){
+      el.innerHTML = '<span class="opslag-dot grijs"></span>Nog geen databestand gekoppeld \u2014 de gegevens staan alleen in deze browser.';
+      return;
+    }
+    if (fout){
+      el.innerHTML = '<span class="opslag-dot rood"></span>Gekoppeld aan <strong>' + escapeHtml(bestandHandle.name) +
+        '</strong>, maar ' + escapeHtml(fout) + '. Klik op \u201cOpnieuw verbinden\u201d.';
+      return;
+    }
+    el.innerHTML = '<span class="opslag-dot groen"></span>Wordt automatisch opgeslagen in <strong>' +
+      escapeHtml(bestandHandle.name) + '</strong>' +
+      (laatstOpgeslagen ? ' \u00b7 laatst om ' + tijdKort(laatstOpgeslagen) : '') + '.';
+  }
+
+  function koppelNieuwBestand(){
+    window.showSaveFilePicker({
+      suggestedName: "jo9-2-data.json",
+      types: [{ description: "Planner-gegevens", accept: { "application/json": [".json"] } }]
+    }).then(function(handle){
+      bestandHandle = handle;
+      return idbZet("bestandHandle", handle);
+    }).then(function(){
+      return schrijfNaarBestand();
+    }).then(function(){
+      renderOpslagStatus();
+    }).catch(function(e){
+      if (e && e.name === "AbortError") return;   // gebruiker annuleerde
+      console.error(e);
+      alert("Kon het bestand niet koppelen.");
+    });
+  }
+
+  function openBestaandBestand(){
+    window.showOpenFilePicker({
+      types: [{ description: "Planner-gegevens", accept: { "application/json": [".json"] } }],
+      multiple: false
+    }).then(function(handles){
+      var handle = handles[0];
+      return handle.getFile().then(function(f){ return f.text(); }).then(function(txt){
+        var data = JSON.parse(txt);
+        if (!data.players || !data.weeks) throw new Error("Onherkenbaar bestand");
+        if (!confirm("Dit vervangt de gegevens in de app door de inhoud van " + handle.name + ". Doorgaan?")) return;
+        bestandHandle = handle;
+        return idbZet("bestandHandle", handle).then(function(){
+          neemStateOver(data);
+          laatstOpgeslagen = new Date();
+          renderOpslagStatus();
+          alert("Gegevens geladen uit " + handle.name + ". Wijzigingen worden nu automatisch hierin bewaard.");
+        });
+      });
+    }).catch(function(e){
+      if (e && e.name === "AbortError") return;
+      console.error(e);
+      alert("Kon dit bestand niet openen.");
+    });
+  }
+
+  function opnieuwVerbinden(){
+    if (!bestandHandle) return;
+    toestemming(bestandHandle, true).then(function(ok){
+      if (ok){ schrijfNaarBestand(); }
+      else { renderOpslagStatus("toestemming geweigerd"); }
+    });
+  }
+
+  function ontkoppelBestand(){
+    if (!confirm("Loskoppelen? De gegevens blijven in deze browser staan, maar worden niet meer automatisch naar het bestand geschreven.")) return;
+    bestandHandle = null;
+    idbZet("bestandHandle", null);
+    renderOpslagStatus();
+  }
+
+  // bij het starten: eerder gekoppeld bestand terugvinden
+  function herstelKoppeling(){
+    if (!FS_BESCHIKBAAR){ renderOpslagStatus(); return; }
+    idbHaal("bestandHandle").then(function(h){
+      if (!h) { renderOpslagStatus(); return; }
+      bestandHandle = h;
+      return toestemming(h, false).then(function(ok){
+        renderOpslagStatus(ok ? null : "de browser vraagt opnieuw om toestemming");
+      });
+    }).catch(function(){ renderOpslagStatus(); });
+  }
+
+  var autoChk = document.getElementById("autoBackupChk");
+  var AUTO_KEY = STORAGE_KEY + "_autobackup";
+  function autoBackupAan(){
+    try { return localStorage.getItem(AUTO_KEY) === "1"; } catch(e){ return false; }
+  }
+  if (autoChk){
+    autoChk.checked = autoBackupAan();
+    autoChk.addEventListener("change", function(){
+      try { localStorage.setItem(AUTO_KEY, autoChk.checked ? "1" : "0"); } catch(e){}
+    });
+  }
+
+  // Na het opslaan van een wedstrijd een back-upbestand wegschrijven. Op een
+  // laptop met gekoppeld bestand is dat overbodig; daar slaan we het over.
+  function autoBackupNaWeek(){
+    if (!autoBackupAan()) return;
+    if (bestandHandle) return;
+    try{
+      var blob = new Blob([JSON.stringify(state, null, 2)], { type:"application/json" });
+      downloadBlob(blob, "jo9-2-backup-" + todayISO() + ".json");
+    }catch(e){ console.error("automatische back-up mislukt", e); }
+  }
+
+  var knopKoppel = document.getElementById("koppelBestandBtn");
+  if (knopKoppel) knopKoppel.addEventListener("click", koppelNieuwBestand);
+  var knopOpen = document.getElementById("openBestandBtn");
+  if (knopOpen) knopOpen.addEventListener("click", openBestaandBestand);
+  var knopHerverbind = document.getElementById("herverbindBtn");
+  if (knopHerverbind) knopHerverbind.addEventListener("click", opnieuwVerbinden);
+  var knopOntkoppel = document.getElementById("ontkoppelBtn");
+  if (knopOntkoppel) knopOntkoppel.addEventListener("click", ontkoppelBestand);
+
+
   // ---------- init ----------
+  herstelKoppeling();
   renderExtraToggle();
   renderBegeleiding();
   renderPresenceRow();
